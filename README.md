@@ -71,6 +71,26 @@ func main() {
 }
 ```
 
+### Redis Sentinel Example
+
+To use Redis Sentinel, use `NewRediStoreWithSentinel`:
+
+```go
+func main() {
+  masterName := "mymaster"
+  sentinelAddrs := []string{"127.0.0.1:26379", "127.0.0.1:26380"}
+  
+  // Fetch new store using Sentinel.
+  store, err := redistore.NewRediStoreWithSentinel(10, masterName, sentinelAddrs, "", "", "0", []byte("secret-key"))
+  if err != nil {
+    panic(err)
+  }
+  defer store.Close()
+  
+  // Use as usual...
+}
+```
+
 ## Configuration
 
 ### SetMaxLength

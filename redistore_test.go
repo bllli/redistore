@@ -8,14 +8,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/sessions"
 )
 
 const (
-	defaultRedisHost = "127.0.0.1"
-	defaultRedisPort = "6379"
+	defaultRedisHost            = "127.0.0.1"
+	defaultRedisPort            = "6379"
+	defaultRedisSentinelServers = "10.0.1.31:5772,10.0.1.31:5773,10.0.1.31:5774"
+	defaultRedisMasterName      = "mymaster"
 )
 
 func setup() string {
@@ -27,6 +30,16 @@ func setup() string {
 	port := os.Getenv("REDIS_PORT")
 	if port == "" {
 		port = defaultRedisPort
+	}
+
+	sentinelServers := os.Getenv("REDIS_SENTINEL_SERVERS")
+	if sentinelServers == "" {
+		sentinelServers = defaultRedisSentinelServers
+	}
+
+	masterName := os.Getenv("REDIS_MASTER_NAME")
+	if masterName == "" {
+		masterName = defaultRedisMasterName
 	}
 
 	return fmt.Sprintf("%s:%s", addr, port)
@@ -447,6 +460,51 @@ func ExampleRediStore() {
 			fmt.Printf("Error closing store: %v\n", err)
 		}
 	}()
+}
+
+func TestNewRediStoreWithSentinel(t *testing.T) {
+	store, err := NewRediStoreWithSentinel(10, "mymaster", strings.Split("10.0.1.31:5772,10.0.1.31:5773,10.0.1.31:5774", ","), "", "", "0", []byte("secret-key"))
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			fmt.Printf("Error closing store: %v\n", err)
+		}
+	}()
+
+	req, _ := http.NewRequest("GET", "http://localhost:8080/", nil)
+	rsp := NewRecorder()
+	session, err := store.Get(req, "session-key")
+	if err != nil {
+		t.Fatalf("Error getting session: %v", err)
+	}
+	flashes := session.Flashes()
+	if len(flashes) != 0 {
+		t.Errorf("Expected empty flashes; Got %v", flashes)
+	}
+	session.AddFlash("foo")
+	if err = sessions.Save(req, rsp); err != nil {
+		t.Fatalf("Error saving session: %v", err)
+	}
+	hdr := rsp.Header()
+	cookies, ok := hdr["Set-Cookie"]
+	if !ok || len(cookies) != 1 {
+		t.Fatalf("No cookies. Header: %s", hdr)
+	}
+
+	req.Header.Add("Cookie", cookies[0])
+	session, err = store.Get(req, "session-key")
+	if err != nil {
+		t.Fatalf("Error getting session: %v", err)
+	}
+	flashes = session.Flashes()
+	if len(flashes) != 1 {
+		t.Fatalf("Expected flashes; Got %v", flashes)
+	}
+	if flashes[0] != "foo" {
+		t.Errorf("Expected foo,bar; Got %v", flashes)
+	}
 }
 
 func init() {
